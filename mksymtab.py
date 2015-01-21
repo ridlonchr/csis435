@@ -21,6 +21,11 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
         self.values = {}
         self.path = []
         self.about_to_see_scope_name = False
+        
+        self.types = {}
+        
+        self.visiting_arguments = False
+        
     def __getitem__(self,name):
     	"""
     		we override [] so that we can access whatever symbols are at the current scope
@@ -29,6 +34,13 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
         for elem in self.path:
             current_node = current_node[elem]
         return current_node[name]
+    def current_node(self):
+    	"""
+    	"""
+        current_node = self.values
+        for elem in self.path:
+            current_node = current_node[elem]
+        return current_node
     def __setitem__(self,name,value):
     	"""
     		we override [] so that we can access/set whatever symbols are at the current scope
@@ -48,6 +60,18 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
             self[node.name] = {}
             self.path.append(node.name)
             self.about_to_see_scope_name = False
+            self["..."] = []
+            self.path.append("...")
+            self.visiting_arguments = True
+            self.generic_visit(node)
+            d = dict(node.children()[0][1].children())
+            return_type = d["type"]
+            self.visiting_arguments = False
+            del self.path[-1]
+            #return_type.children()
+            self["return"] = return_type
+        elif self.visiting_arguments:
+        	self.current_node().append((node.name,node))
         else:
             self[node.name] = node
     def visit_FuncDef(self,node):
@@ -59,6 +83,10 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
         self.about_to_see_scope_name = True
         self.generic_visit(node)
         del self.path[-1]
+        
+    def visit_Typedef(self,node):
+    	self.types[node.name] = node
+    	self.generic_visit(node)
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:    # optionally support passing in some code as a command-line argument
@@ -73,15 +101,17 @@ typedef struct foobar {
 int q[100];
 foobar w[100];
 int z;
-int foo() {
+int foo(int a, int b) {
     int x;
     int y;
     return (x+y);
 };
-int bar() {
+int bar(int c, int d) {
 	int y;
 	int z;
 };
+test() {};
+
 """
 
     cparser = pycparser.c_parser.CParser()
@@ -90,3 +120,4 @@ int bar() {
     dv = SymbolTableBuilder()
     dv.visit(parsed_code)
     pprint.pprint(dv.values)
+    pprint.pprint(dv.types)
