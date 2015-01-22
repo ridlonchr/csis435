@@ -2,6 +2,35 @@ import pycparser # the C parser written in Python
 import sys # so we can access command-line args
 import pprint # so we can pretty-print our output
 
+class NestedDict(object):
+    def __init__(self):
+        self.values = {}
+        self.path = []
+    def __getitem__(self,name):
+        """
+            we override [] so that we can access whatever symbols are at the current scope
+        """
+        current_node = self.values
+        for elem in self.path:
+            current_node = current_node[elem]
+        return current_node[name]
+    def current_node(self):
+        """
+        """
+        current_node = self.values
+        for elem in self.path:
+            current_node = current_node[elem]
+        return current_node
+    def __setitem__(self,name,value):
+        """
+            we override [] so that we can access/set whatever symbols are at the current scope
+        """
+        current_node = self.values
+        for elem in self.path:
+            current_node = current_node[elem]
+        current_node[name] = value
+
+
 class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
     """
         This subclass of NodeVisitor builds the symbol table.
@@ -18,75 +47,72 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
             about_to_see_scope_name is used when we encounter something, like a function declaration,
             that indicates that the next declaration will be the name of a new scope
         """
-        self.values = {}
-        self.path = []
+        self.values = NestedDict()
+
         self.about_to_see_scope_name = False
         
-        self.types = {}
+        self.types = NestedDict()
         
         self.visiting_arguments = False
+        self.visiting_typedef = False
         
-    def __getitem__(self,name):
-    	"""
-    		we override [] so that we can access whatever symbols are at the current scope
-    	"""
-        current_node = self.values
-        for elem in self.path:
-            current_node = current_node[elem]
-        return current_node[name]
-    def current_node(self):
-    	"""
-    	"""
-        current_node = self.values
-        for elem in self.path:
-            current_node = current_node[elem]
-        return current_node
-    def __setitem__(self,name,value):
-    	"""
-    		we override [] so that we can access/set whatever symbols are at the current scope
-    	"""
-        current_node = self.values
-        for elem in self.path:
-            current_node = current_node[elem]
-        current_node[name] = value
     def visit_Decl(self,node):
-    	"""
-    		this gets called, as part of the visitor design pattern,
-    			whenever a Decl is encountered in the parse tree
-    		Here we want to handle it accordingly in order to ensure that we either put it in the table,
-    			or create a new scope with this being the name of that
-    	'"""
+        """
+            this gets called, as part of the visitor design pattern,
+                whenever a Decl is encountered in the parse tree
+            Here we want to handle it accordingly in order to ensure that we either put it in the table,
+                or create a new scope with this being the name of that
+        """
+        def get_type(x):
+            return dict(x.children())["type"].names
+        if self.visiting_typedef:
+            what = self.types
+        else:
+            what = self.values
         if self.about_to_see_scope_name:
-            self[node.name] = {}
-            self.path.append(node.name)
+            what[node.name] = {}
+            what.path.append(node.name)
             self.about_to_see_scope_name = False
-            self["..."] = []
-            self.path.append("...")
+            what["..."] = []
+            what.path.append("...")
             self.visiting_arguments = True
             self.generic_visit(node)
             d = dict(node.children()[0][1].children())
             return_type = d["type"]
             self.visiting_arguments = False
-            del self.path[-1]
-            #return_type.children()
-            self["return"] = return_type
+            del what.path[-1]
+            what["return"] = get_type(return_type)
         elif self.visiting_arguments:
-        	self.current_node().append((node.name,node))
+            the_type = (dict(node.children())["type"])
+            what.current_node().append((node.name,get_type(the_type)))
         else:
-            self[node.name] = node
+            the_type = (dict(node.children())["type"])
+            if isinstance(the_type,pycparser.c_ast.TypeDecl):
+                what[node.name] = get_type(the_type)
+            elif isinstance(the_type,pycparser.c_ast.ArrayDecl):
+                d = dict(the_type.children())
+                dim = d["dim"]
+                the_type = d["type"]
+                what[node.name] = (dim.value,get_type(the_type))
+            else:
+                what[node.name] = the_type
     def visit_FuncDef(self,node):
-    	"""
-    		this gets called, as part of the visitor design pattern,
-    			whenever a FuncDef is encountered in the parse tree
-    		Here we want to have it signal that we're going to be starting a new scope with the next Decl
-    	"""
+        """
+            this gets called, as part of the visitor design pattern,
+                whenever a FuncDef is encountered in the parse tree
+            Here we want to have it signal that we're going to be starting a new scope with the next Decl
+        """
         self.about_to_see_scope_name = True
         self.generic_visit(node)
-        del self.path[-1]
+        del self.values.path[-1]
         
     def visit_Typedef(self,node):
-    	self.types[node.name] = node
-    	self.generic_visit(node)
+        self.types[node.name] = {}
+        self.types.path.append(node.name)
+        self.visiting_typedef = True
+        self.generic_visit(node)
+        self.visiting_typedef = False
+        del self.types.path[-1]
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:    # optionally support passing in some code as a command-line argument
@@ -94,9 +120,9 @@ if __name__ == "__main__":
     else: # this can not handle the typedef and struct below correctly. Need to work on it.
         code_to_parse = """
 typedef struct foobar {
-	int f;
-	int b;
-	struct foobar * fb;
+    int f;
+    int b;
+    struct foobar * fb;
 } foobar;
 int q[100];
 foobar w[100];
@@ -107,10 +133,12 @@ int foo(int a, int b) {
     return (x+y);
 };
 int bar(int c, int d) {
-	int y;
-	int z;
+    int y;
+    int z;
 };
 test() {};
+typedef int strange_unit;
+strange_unit bob;
 
 """
 
@@ -119,5 +147,5 @@ test() {};
     parsed_code.show()
     dv = SymbolTableBuilder()
     dv.visit(parsed_code)
-    pprint.pprint(dv.values)
-    pprint.pprint(dv.types)
+    pprint.pprint(dv.values.values)
+    pprint.pprint(dv.types.values)
