@@ -1,7 +1,7 @@
 import pycparser # the C parser written in Python
 import sys # so we can access command-line args
 import pprint # so we can pretty-print our output
-#Test Comment
+
 class NestedDict(object):
     def __init__(self):
         self.values = {}
@@ -43,19 +43,19 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
                 with the values either being the nodes that those symbols correspond to,
                 or a dict representing a subscope
             the path is used to indicate the current scope that we're working with.
-            
+
             about_to_see_scope_name is used when we encounter something, like a function declaration,
             that indicates that the next declaration will be the name of a new scope
         """
         self.values = NestedDict()
 
         self.about_to_see_scope_name = False
-        
+
         self.types = NestedDict()
-        
+
         self.visiting_arguments = False
         self.visiting_typedef = False
-        
+
     def visit_Decl(self,node):
         """
             this gets called, as part of the visitor design pattern,
@@ -105,7 +105,7 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
         self.about_to_see_scope_name = True
         self.generic_visit(node)
         del self.values.path[-1]
-        
+
     def visit_Typedef(self,node):
         self.types[node.name] = {}
         self.types.path.append(node.name)
@@ -139,7 +139,6 @@ int bar(int c, int d) {
 test() {};
 typedef int strange_unit;
 strange_unit bob;
-
 """
 
     cparser = pycparser.c_parser.CParser()
